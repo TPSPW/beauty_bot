@@ -6,7 +6,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ТОКЕН ВАШЕГО БОТА
@@ -50,6 +50,8 @@ MASTERS = [
 
 # Временное хранилище данных пользователя
 user_data = {}
+# Хранилище ID последних сообщений для удаления
+user_messages = {}
 
 def save_temp(user_id, field, value):
     if user_id not in user_data:
@@ -62,6 +64,28 @@ def get_temp(user_id):
 def clear_temp(user_id):
     if user_id in user_data:
         del user_data[user_id]
+
+async def delete_previous_messages(user_id, chat_id):
+    """Удаляет предыдущие сообщения пользователя и ответы бота"""
+    if user_id in user_messages:
+        for msg_id in user_messages[user_id]:
+            try:
+                await bot.delete_message(chat_id, msg_id)
+            except:
+                pass
+        user_messages[user_id] = []
+
+async def save_message_ids(user_id, *message_ids):
+    """Сохраняет ID сообщений для последующего удаления"""
+    if user_id not in user_messages:
+        user_messages[user_id] = []
+    for msg_id in message_ids:
+        if msg_id not in user_messages[user_id]:
+            user_messages[user_id].append(msg_id)
+    
+    # Оставляем только последние 20 сообщений
+    if len(user_messages[user_id]) > 20:
+        user_messages[user_id] = user_messages[user_id][-20:]
 
 # ============ КЛАВИАТУРЫ ============
 
@@ -124,13 +148,27 @@ def get_back_to_main_keyboard():
     builder.button(text="🔙 В главное меню", callback_data="back_to_main")
     return builder.as_markup()
 
+def get_contact_keyboard():
+    """Клавиатура с кнопкой для отправки контакта"""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Отправить номер телефона", request_contact=True)]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    return keyboard
+
 # ============ КОМАНДЫ ============
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
+    # Очищаем предыдущие сообщения
+    await delete_previous_messages(message.from_user.id, message.chat.id)
     await state.clear()
     clear_temp(message.from_user.id)
-    await message.answer(
+    
+    msg = await message.answer(
         "👋 Добро пожаловать в наш салон красоты!\n\n"
         "✨ Здесь вы можете:\n"
         "• Записаться на процедуру\n"
@@ -139,44 +177,73 @@ async def cmd_start(message: types.Message, state: FSMContext):
         "Выберите действие:",
         reply_markup=get_main_keyboard()
     )
+    await save_message_ids(message.from_user.id, message.message_id, msg.message_id)
 
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
+    await delete_previous_messages(message.from_user.id, message.chat.id)
     await state.clear()
     clear_temp(message.from_user.id)
-    await message.answer("❌ Действие отменено. Возвращаемся в главное меню.", reply_markup=get_main_keyboard())
+    
+    msg = await message.answer(
+        "❌ Действие отменено. Возвращаемся в главное меню.",
+        reply_markup=get_main_keyboard()
+    )
+    await save_message_ids(message.from_user.id, message.message_id, msg.message_id)
 
 # ============ НАВИГАЦИЯ ============
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     await state.clear()
     clear_temp(callback.from_user.id)
-    await callback.message.edit_text("Главное меню:", reply_markup=get_main_keyboard())
+    
+    await callback.message.answer(
+        "Главное меню:",
+        reply_markup=get_main_keyboard()
+    )
     await callback.answer()
 
 @dp.callback_query(F.data == "back_to_services")
 async def back_to_services(callback: types.CallbackQuery, state: FSMContext):
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     await state.set_state(BookingStates.choosing_service)
-    await callback.message.edit_text("Выберите услугу:", reply_markup=get_services_keyboard())
+    
+    await callback.message.answer(
+        "Выберите услугу:",
+        reply_markup=get_services_keyboard()
+    )
     await callback.answer()
 
 @dp.callback_query(F.data == "back_to_masters")
 async def back_to_masters(callback: types.CallbackQuery, state: FSMContext):
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     await state.set_state(BookingStates.choosing_master)
-    await callback.message.edit_text("Выберите мастера:", reply_markup=get_masters_keyboard())
+    
+    await callback.message.answer(
+        "Выберите мастера:",
+        reply_markup=get_masters_keyboard()
+    )
     await callback.answer()
 
 @dp.callback_query(F.data == "back_to_dates")
 async def back_to_dates(callback: types.CallbackQuery, state: FSMContext):
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     await state.set_state(BookingStates.choosing_date)
-    await callback.message.edit_text("Выберите дату:", reply_markup=get_dates_keyboard())
+    
+    await callback.message.answer(
+        "Выберите дату:",
+        reply_markup=get_dates_keyboard()
+    )
     await callback.answer()
 
 # ============ О САЛОНЕ ============
 
 @dp.callback_query(F.data == "about")
 async def about_salon(callback: types.CallbackQuery):
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
+    
     text = (
         "✨ **Наш салон красоты** ✨\n\n"
         "📍 Адрес: ул. Примерная, д. 123\n"
@@ -189,26 +256,33 @@ async def about_salon(callback: types.CallbackQuery):
         "• Массаж и уход за лицом\n\n"
         "Ждём вас в нашем салоне! ❤️"
     )
-    await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard())
+    msg = await callback.message.answer(text, reply_markup=get_back_to_main_keyboard())
+    await save_message_ids(callback.from_user.id, msg.message_id)
     await callback.answer()
 
 # ============ МОИ ЗАПИСИ (ДЕМО) ============
 
 @dp.callback_query(F.data == "my_bookings")
 async def my_bookings(callback: types.CallbackQuery):
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
+    
     text = "📋 Здесь будут ваши записи.\n\nПока что это демо-версия. Полная версия появится после подключения YCLIENTS."
-    await callback.message.edit_text(text, reply_markup=get_back_to_main_keyboard())
+    msg = await callback.message.answer(text, reply_markup=get_back_to_main_keyboard())
+    await save_message_ids(callback.from_user.id, msg.message_id)
     await callback.answer()
 
 # ============ НОВАЯ ЗАПИСЬ ============
 
 @dp.callback_query(F.data == "new_booking")
 async def new_booking(callback: types.CallbackQuery, state: FSMContext):
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     await state.set_state(BookingStates.choosing_service)
-    await callback.message.edit_text(
+    
+    msg = await callback.message.answer(
         "Выберите услугу:",
         reply_markup=get_services_keyboard()
     )
+    await save_message_ids(callback.from_user.id, msg.message_id)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("service_"))
@@ -221,11 +295,14 @@ async def service_chosen(callback: types.CallbackQuery, state: FSMContext):
         save_temp(callback.from_user.id, "service_name", service["name"])
         save_temp(callback.from_user.id, "service_price", service["price"])
     
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     await state.set_state(BookingStates.choosing_master)
-    await callback.message.edit_text(
+    
+    msg = await callback.message.answer(
         f"💇 Услуга: {service['name']} — {service['price']} ₽\n\nТеперь выберите мастера:",
         reply_markup=get_masters_keyboard()
     )
+    await save_message_ids(callback.from_user.id, msg.message_id)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("master_"))
@@ -237,11 +314,14 @@ async def master_chosen(callback: types.CallbackQuery, state: FSMContext):
         save_temp(callback.from_user.id, "master_id", master_id)
         save_temp(callback.from_user.id, "master_name", master["name"])
     
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     await state.set_state(BookingStates.choosing_date)
-    await callback.message.edit_text(
+    
+    msg = await callback.message.answer(
         f"👨‍🎨 Мастер: {master['name']}\n\nВыберите дату:",
         reply_markup=get_dates_keyboard()
     )
+    await save_message_ids(callback.from_user.id, msg.message_id)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("date_"))
@@ -253,11 +333,14 @@ async def date_chosen(callback: types.CallbackQuery, state: FSMContext):
     formatted_date = date_obj.strftime("%d.%m.%Y")
     save_temp(callback.from_user.id, "formatted_date", formatted_date)
     
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     await state.set_state(BookingStates.choosing_time)
-    await callback.message.edit_text(
+    
+    msg = await callback.message.answer(
         f"📅 Дата: {formatted_date}\n\nВыберите удобное время:",
         reply_markup=get_times_keyboard()
     )
+    await save_message_ids(callback.from_user.id, msg.message_id)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("time_"))
@@ -265,33 +348,72 @@ async def time_chosen(callback: types.CallbackQuery, state: FSMContext):
     time_str = callback.data.split("_")[1]
     save_temp(callback.from_user.id, "selected_time", time_str)
     
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     await state.set_state(BookingStates.entering_name)
     
     cancel_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_main")]
     ])
     
-    await callback.message.edit_text(
+    msg = await callback.message.answer(
         f"⏰ Время: {time_str}\n\nВведите ваше имя:",
         reply_markup=cancel_keyboard
     )
+    await save_message_ids(callback.from_user.id, msg.message_id)
     await callback.answer()
 
 @dp.message(BookingStates.entering_name)
 async def name_entered(message: types.Message, state: FSMContext):
+    await delete_previous_messages(message.from_user.id, message.chat.id)
+    
     if len(message.text.strip()) < 2:
-        await message.answer("Пожалуйста, введите корректное имя (минимум 2 символа):")
+        msg = await message.answer("Пожалуйста, введите корректное имя (минимум 2 символа):")
+        await save_message_ids(message.from_user.id, message.message_id, msg.message_id)
         return
     
     save_temp(message.from_user.id, "client_name", message.text.strip())
     await state.set_state(BookingStates.entering_phone)
     
-    await message.answer(
-        f"👤 Имя: {message.text.strip()}\n\nВведите ваш номер телефона:\n📱 Например: +7 999 123-45-67"
+    msg = await message.answer(
+        f"👤 Имя: {message.text.strip()}\n\nПоделитесь вашим номером телефона:",
+        reply_markup=get_contact_keyboard()
     )
+    await save_message_ids(message.from_user.id, message.message_id, msg.message_id)
 
-@dp.message(BookingStates.entering_phone)
-async def phone_entered(message: types.Message, state: FSMContext):
+@dp.message(BookingStates.entering_phone, F.contact)
+async def contact_received(message: types.Message, state: FSMContext):
+    # Получаем номер из контакта
+    phone = message.contact.phone_number
+    save_temp(message.from_user.id, "client_phone", phone)
+    
+    await delete_previous_messages(message.from_user.id, message.chat.id)
+    
+    temp = get_temp(message.from_user.id)
+    
+    confirm_text = (
+        "📝 **Проверьте данные записи:**\n\n"
+        f"💇 Услуга: {temp.get('service_name', '—')}\n"
+        f"💰 Цена: {temp.get('service_price', '—')} ₽\n"
+        f"👨‍🎨 Мастер: {temp.get('master_name', '—')}\n"
+        f"📅 Дата: {temp.get('formatted_date', '—')}\n"
+        f"⏰ Время: {temp.get('selected_time', '—')}\n"
+        f"👤 Имя: {temp.get('client_name', '—')}\n"
+        f"📞 Телефон: {temp.get('client_phone', '—')}\n\n"
+        "Всё верно?"
+    )
+    
+    await state.set_state(BookingStates.confirming)
+    msg = await message.answer(
+        confirm_text,
+        reply_markup=get_confirmation_keyboard()
+    )
+    await save_message_ids(message.from_user.id, msg.message_id)
+
+# Если пользователь ввел номер вручную (не через кнопку)
+@dp.message(BookingStates.entering_phone, F.text)
+async def phone_entered_manual(message: types.Message, state: FSMContext):
+    await delete_previous_messages(message.from_user.id, message.chat.id)
+    
     phone = message.text.strip()
     save_temp(message.from_user.id, "client_phone", phone)
     
@@ -310,17 +432,28 @@ async def phone_entered(message: types.Message, state: FSMContext):
     )
     
     await state.set_state(BookingStates.confirming)
-    await message.answer(confirm_text, reply_markup=get_confirmation_keyboard())
+    msg = await message.answer(
+        confirm_text,
+        reply_markup=get_confirmation_keyboard()
+    )
+    await save_message_ids(message.from_user.id, msg.message_id)
 
 @dp.callback_query(F.data == "confirm_yes", StateFilter(BookingStates.confirming))
 async def confirm_booking(callback: types.CallbackQuery, state: FSMContext):
     temp = get_temp(callback.from_user.id)
     
     if not temp:
-        await callback.message.edit_text("Ошибка. Начните запись заново.", reply_markup=get_main_keyboard())
+        await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
         await state.clear()
+        msg = await callback.message.answer(
+            "Ошибка. Начните запись заново.",
+            reply_markup=get_main_keyboard()
+        )
+        await save_message_ids(callback.from_user.id, msg.message_id)
         await callback.answer()
         return
+    
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     
     success_text = (
         "✅ **Запись успешно создана!**\n\n"
@@ -331,7 +464,8 @@ async def confirm_booking(callback: types.CallbackQuery, state: FSMContext):
         "Напоминание придёт за час до записи."
     )
     
-    await callback.message.edit_text(success_text, reply_markup=get_main_keyboard())
+    msg = await callback.message.answer(success_text, reply_markup=get_main_keyboard())
+    await save_message_ids(callback.from_user.id, msg.message_id)
     
     clear_temp(callback.from_user.id)
     await state.clear()
@@ -339,9 +473,15 @@ async def confirm_booking(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "confirm_no", StateFilter(BookingStates.confirming))
 async def cancel_booking(callback: types.CallbackQuery, state: FSMContext):
+    await delete_previous_messages(callback.from_user.id, callback.message.chat.id)
     clear_temp(callback.from_user.id)
     await state.clear()
-    await callback.message.edit_text("❌ Запись отменена.", reply_markup=get_main_keyboard())
+    
+    msg = await callback.message.answer(
+        "❌ Запись отменена.",
+        reply_markup=get_main_keyboard()
+    )
+    await save_message_ids(callback.from_user.id, msg.message_id)
     await callback.answer()
 
 # ============ ЗАПУСК БОТА ============
