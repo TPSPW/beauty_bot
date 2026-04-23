@@ -6,7 +6,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ТОКЕН ВАШЕГО БОТА
@@ -28,7 +28,6 @@ class BookingStates(StatesGroup):
     choosing_date = State()
     choosing_time = State()
     showing_salons = State()
-    choosing_salon = State()
     entering_name = State()
     entering_phone = State()
     confirming = State()
@@ -99,7 +98,7 @@ SALONS = [
         "metro_id": 1,
         "city_id": 1,
         "services": [1, 2, 3],
-        "prices": {1: 1200, 2: 2200, 3: 1800},  # цена для каждой услуги
+        "prices": {1: 1200, 2: 2200, 3: 1800},
         "rating": 4.9,
         "price_level": "средний",
         "phone": "+7 (999) 111-22-33",
@@ -159,34 +158,24 @@ SALONS = [
     },
 ]
 
-# Доступные временные слоты для теста
-# Формат: {салон_id: {дата: [времена]}}
+# ============ ГЕНЕРАЦИЯ СВОБОДНЫХ СЛОТОВ НА БЛИЖАЙШИЕ ДНИ ============
+
+def generate_available_slots():
+    """Генерирует свободные слоты на ближайшие 7 дней"""
+    slots = {}
+    today = datetime.now()
+    for i in range(7):
+        date = (today + timedelta(days=i)).strftime("%Y-%m-%d")
+        slots[date] = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"]
+    return slots
+
+# Для каждого салона генерируем слоты
 AVAILABLE_SLOTS = {
-    1: {
-        "2025-04-25": ["10:00", "12:00", "14:00", "16:00", "18:00"],
-        "2025-04-26": ["11:00", "13:00", "15:00", "17:00", "19:00"],
-        "2025-04-27": ["10:00", "11:00", "14:00", "16:00"],
-    },
-    2: {
-        "2025-04-25": ["09:00", "11:00", "13:00", "15:00", "17:00"],
-        "2025-04-26": ["10:00", "12:00", "14:00", "16:00", "18:00"],
-        "2025-04-27": ["09:00", "11:00", "13:00", "15:00"],
-    },
-    3: {
-        "2025-04-25": ["10:00", "12:00", "14:00", "16:00", "18:00", "20:00"],
-        "2025-04-26": ["10:00", "12:00", "14:00", "16:00", "18:00", "20:00"],
-        "2025-04-27": ["10:00", "12:00", "14:00", "16:00", "18:00"],
-    },
-    4: {
-        "2025-04-25": ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00"],
-        "2025-04-26": ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00"],
-        "2025-04-27": ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00"],
-    },
-    5: {
-        "2025-04-25": ["09:00", "11:00", "13:00", "15:00", "17:00", "19:00"],
-        "2025-04-26": ["09:00", "11:00", "13:00", "15:00", "17:00", "19:00"],
-        "2025-04-27": ["09:00", "11:00", "13:00", "15:00", "17:00"],
-    },
+    1: generate_available_slots(),
+    2: generate_available_slots(),
+    3: generate_available_slots(),
+    4: generate_available_slots(),
+    5: generate_available_slots(),
 }
 
 # Временное хранилище
@@ -265,12 +254,19 @@ def get_available_times_for_salon(salon_id, date_str):
     """Возвращает доступное время для конкретного салона на дату"""
     return AVAILABLE_SLOTS.get(salon_id, {}).get(date_str, [])
 
+def format_date_ru(date_str):
+    """Форматирует дату в читаемый вид"""
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        return d.strftime("%d.%m.%Y")
+    except:
+        return date_str
+
 # ============ КЛАВИАТУРЫ ============
 
 def get_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="✏️ Новая запись", callback_data="new_booking")
-    builder.button(text="📋 Мои записи", callback_data="my_bookings")
     builder.button(text="ℹ️ О сервисе", callback_data="about")
     builder.adjust(1)
     return builder.as_markup()
@@ -322,12 +318,10 @@ def get_dates_keyboard():
     builder.adjust(2)
     return builder.as_markup()
 
-def get_times_keyboard(salon_id, date_str):
-    """Клавиатура с доступным временем для конкретного салона"""
+def get_times_keyboard():
+    """Клавиатура с доступным временем (общая для всех салонов на первом этапе)"""
     builder = InlineKeyboardBuilder()
-    times = get_available_times_for_salon(salon_id, date_str)
-    if not times:
-        times = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"]
+    times = ["10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"]
     for t in times:
         builder.button(text=t, callback_data=f"time_{t}")
     builder.button(text="🔙 Назад", callback_data="back_to_dates")
@@ -372,34 +366,6 @@ def get_back_to_main_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 В главное меню", callback_data="back_to_main")
     return builder.as_markup()
-
-# ============ КОМАНДЫ ============
-
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message, state: FSMContext):
-    await clear_session_history(message.from_user.id, message.chat.id)
-    await state.clear()
-    clear_temp(message.from_user.id)
-    msg = await message.answer(
-        "👋 Добро пожаловать в сервис поиска салонов красоты!\n\n"
-        "✨ Вы сможете:\n"
-        "• Выбрать услугу\n"
-        "• Указать бюджет\n"
-        "• Выбрать город и метро\n"
-        "• Выбрать удобную дату и время\n"
-        "• Найти ближайшие салоны\n\n"
-        "Начнём? 👇",
-        reply_markup=get_main_keyboard()
-    )
-    await save_message(message.from_user.id, msg.message_id)
-
-@dp.message(Command("cancel"))
-async def cmd_cancel(message: types.Message, state: FSMContext):
-    await clear_session_history(message.from_user.id, message.chat.id)
-    await state.clear()
-    clear_temp(message.from_user.id)
-    msg = await message.answer("❌ Действие отменено.", reply_markup=get_main_keyboard())
-    await save_message(message.from_user.id, msg.message_id)
 
 # ============ НАВИГАЦИЯ ============
 
@@ -454,6 +420,34 @@ async def back_to_dates(callback: types.CallbackQuery, state: FSMContext):
     await save_message(callback.from_user.id, msg.message_id)
     await callback.answer()
 
+# ============ КОМАНДЫ ============
+
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message, state: FSMContext):
+    await clear_session_history(message.from_user.id, message.chat.id)
+    await state.clear()
+    clear_temp(message.from_user.id)
+    msg = await message.answer(
+        "👋 Добро пожаловать в сервис поиска салонов красоты!\n\n"
+        "✨ Вы сможете:\n"
+        "• Выбрать услугу\n"
+        "• Указать бюджет\n"
+        "• Выбрать город и метро\n"
+        "• Выбрать удобную дату и время\n"
+        "• Найти ближайшие салоны\n\n"
+        "Начнём? 👇",
+        reply_markup=get_main_keyboard()
+    )
+    await save_message(message.from_user.id, msg.message_id)
+
+@dp.message(Command("cancel"))
+async def cmd_cancel(message: types.Message, state: FSMContext):
+    await clear_session_history(message.from_user.id, message.chat.id)
+    await state.clear()
+    clear_temp(message.from_user.id)
+    msg = await message.answer("❌ Действие отменено.", reply_markup=get_main_keyboard())
+    await save_message(message.from_user.id, msg.message_id)
+
 # ============ ИНФО ============
 
 @dp.callback_query(F.data == "about")
@@ -470,14 +464,6 @@ async def about_service(callback: types.CallbackQuery):
         "После выбора всех фильтров бот покажет\n"
         "подходящие салоны с ценой и рейтингом."
     )
-    msg = await callback.message.answer(text, reply_markup=get_back_to_main_keyboard())
-    await save_message(callback.from_user.id, msg.message_id)
-    await callback.answer()
-
-@dp.callback_query(F.data == "my_bookings")
-async def my_bookings(callback: types.CallbackQuery):
-    await clear_session_history(callback.from_user.id, callback.message.chat.id)
-    text = "📋 Здесь будут ваши активные записи.\n\nПока что записей нет."
     msg = await callback.message.answer(text, reply_markup=get_back_to_main_keyboard())
     await save_message(callback.from_user.id, msg.message_id)
     await callback.answer()
@@ -580,13 +566,12 @@ async def date_chosen(callback: types.CallbackQuery, state: FSMContext):
     save_temp(callback.from_user.id, "selected_date", date_str)
     save_temp(callback.from_user.id, "formatted_date", formatted_date)
     
-    # Сначала показываем выбор времени
     await clean_old_messages(callback.from_user.id, callback.message.chat.id, keep_last=2)
     await state.set_state(BookingStates.choosing_time)
     msg = await callback.message.answer(
         f"✅ Дата: {formatted_date}\n\n"
         "⏰ Шаг 6 из 6: Выберите время",
-        reply_markup=get_times_keyboard(None, date_str)  # временно без салона
+        reply_markup=get_times_keyboard()
     )
     await save_message(callback.from_user.id, msg.message_id)
     await callback.answer()
@@ -621,8 +606,6 @@ async def time_chosen(callback: types.CallbackQuery, state: FSMContext):
         await save_message(callback.from_user.id, msg.message_id)
         await callback.answer()
         return
-    
-    await state.set_state(BookingStates.showing_salons)
     
     # Показываем найденные салоны
     salons_text = f"🔍 Найдено {len(salons)} салонов:\n\n"
