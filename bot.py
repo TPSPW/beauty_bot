@@ -193,6 +193,16 @@ def get_back_to_main_keyboard():
 
 # ============ КОМАНДЫ ============
 
+async def clear_user_history(user_id, chat_id):
+    """Полностью очищает всю историю сообщений пользователя"""
+    if user_id in user_messages:
+        for msg_id in user_messages[user_id]:
+            try:
+                await bot.delete_message(chat_id, msg_id)
+            except:
+                pass
+        user_messages[user_id] = []
+        
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await clear_session_history(message.from_user.id, message.chat.id)
@@ -215,7 +225,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery, state: FSMContext):
-    await clear_session_history(callback.from_user.id, callback.message.chat.id)
+    await clear_user_history(callback.from_user.id, callback.message.chat.id)
     await state.clear()
     clear_temp(callback.from_user.id)
     msg = await callback.message.answer("Главное меню:", reply_markup=get_main_keyboard())
@@ -268,7 +278,9 @@ async def back_to_dates(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "new_booking")
 async def new_booking(callback: types.CallbackQuery, state: FSMContext):
-    await clear_session_history(callback.from_user.id, callback.message.chat.id)
+    await clear_user_history(callback.from_user.id, callback.message.chat.id)
+    await state.clear()
+    clear_temp(callback.from_user.id)
     await state.set_state(BookingStates.choosing_service)
     msg = await callback.message.answer("🎯 Шаг 1 из 6: Выберите услугу", reply_markup=get_services_keyboard())
     await save_message(callback.from_user.id, msg.message_id)
